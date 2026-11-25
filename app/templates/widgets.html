@@ -33,7 +33,11 @@
 <section class="panel inspection"><h2 id="detail-title">采信摘要</h2><div id="detail"></div></section>
 {% endmacro %}
 {% macro archive() %}
-<aside class="panel archive" id="review-area"><h2>批次复核</h2><ul id="history"></ul>
+<aside class="panel archive" id="review-area"><h2>分组交接结论</h2>
+  <p id="handoff-summary" class="chart-note">执行批次后按组给出签发、暂缓或待复核结论。</p>
+  <p id="transition-note" class="chart-note" hidden></p>
+  <ul id="group-handoff" aria-label="分组交接结论"></ul>
+  <h2>批次复核</h2><ul id="history"></ul>
   <form id="review" hidden>
     <p id="run-status"></p><label for="note">复核意见</label>
     <textarea id="note" name="note" minlength="3" maxlength="200" required></textarea>

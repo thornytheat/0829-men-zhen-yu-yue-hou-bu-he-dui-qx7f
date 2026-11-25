@@ -1,6 +1,8 @@
 import {element} from './client.js';
 
-const labels = {READY:'通过', MISMATCH:'数值不符', PENDING:'待复核', APPROVED:'已签发', HELD:'已暂缓',
+const labels = {READY:'通过', MISMATCH:'数值不符', PENDING:'待复核', PENDING_REVIEW:'待复核', UNSIGNED:'未签发', APPROVED:'已签发', HELD:'已暂缓',
+  CROSS_GROUP_CONFLICT:'同一记录号在不同组内容冲突，涉事组都暂缓', DUPLICATE_CONFLICT:'记录版本冲突', UNRECOGNIZABLE_GROUP:'坏行连分组都认不出，所有未签发组暂缓',
+  GROUP_EMPTY:'原分组已清空', GROUP_NOT_COMPUTABLE:'分组无法计算', RECORD_MOVED:'记录跨组', SOURCE_CHANGED:'来源已更新',
   INVALID_EQUIVALENCE:'互认条件无效', CREDIT_SHORTFALL:'学分不足', TICKET_MISMATCH:'联单信息不符',
   CONTAMINATION_LIMIT:'杂质率超限', DATA_POSITION_CONFLICT:'数据位置冲突', DANGLING_POSITION:'悬空位置删除',
   LINEAGE_CYCLE:'字段依赖成环', LABEL_TOO_LOW:'分级低于来源', DEPENDENCY_CYCLE:'任务依赖成环',
@@ -31,7 +33,7 @@ const valueLabels = {RPD:'相对偏差', ABSOLUTE:'绝对差', BOTH_ND:'双方�
   MISSING_REQUIRED:'缺少必填字段', AUTHORITY_CONFLICT:'权威编号冲突', CANNOT_LINK:'禁止合并',
   UPSTREAM_UNSCHEDULED:'上游未排程', NO_FEASIBLE_SLOT:'无可用时隙', LEGAL_HOLD:'合法保全',
   RECLAIM:'可回收', LIVE_SNAPSHOT:'活动快照', TRANSPORT:'运输中', DELIVERED:'已签收', CANCELLED:'已取消'};
-const headers = ['业务分组', '输入行', '计算值', '参考值', '判定'];
+const headers = ['业务分组', '输入行', '计算值', '参考值', '判定', '交接结论'];
 
 export function badge(status) {
   return element('span', labels[status] || status, {class:'badge', 'data-result':status, title: status});
@@ -96,6 +98,7 @@ export function snapshot(report, selected, stage) {
       tr.insertCell().append(button);
       [row.records.length, row.measure ? `${row.measure.value} ${row.measure.unit}` : '—', row.measure ? `${row.measure.expected} ${row.measure.unit}` : '—'].forEach(value=>tr.insertCell().textContent=value);
       tr.insertCell().append(badge(row.status));
+      tr.insertCell().append(badge(row.handoff_status || row.handoff?.status || row.status));
     }
   }
   table.createTHead().append(head);
@@ -116,4 +119,67 @@ export function history(items, active) {
     target.append(item);
   }
   if (!items.length) target.append(element('li','尚无执行批次'));
+}
+
+export function handoffPanel(handoff, committed = false) {
+  const target = document.querySelector('#group-handoff');
+  const summary = document.querySelector('#handoff-summary');
+  const transition = document.querySelector('#transition-note');
+  if (!target) return;
+  target.replaceChildren();
+  if (summary) summary.textContent = handoff?.conclusion || '执行批次后按组给出交接结论。';
+  if (transition) {
+    const moves = handoff?.moved_records || [];
+    transition.hidden = moves.length === 0;
+    transition.textContent = moves.length
+      ? `源数据更新：${moves.map(move => `${move.record} 由 ${move.old_group} 跨组到 ${move.new_group}`).join('；')}。原组和新组均已重算，受影响的签发转待复核，原签发件仍能查回。`
+      : '';
+  }
+  if (!handoff?.groups?.length) {
+    target.append(element('li','当前没有可交接分组'));
+    return;
+  }
+
+  for (const item of handoff.groups) {
+    const group = element('li', undefined, {class:'group-handoff-item', 'data-group':item.group});
+    const head = element('div', undefined, {class:'group-handoff-head'});
+    head.append(element('strong', `分组 ${item.group}`), badge(item.status));
+    group.append(head);
+    group.append(element('p', item.conclusion, {class:'group-conclusion'}));
+
+    const reasons = [...(item.reasons || []), ...(item.warnings || []).map(w => w.code)];
+    if (reasons.length) {
+      const list = element('ul', undefined, {class:'group-reasons'});
+      for (const code of [...new Set(reasons)]) {
+        list.append(element('li', labels[code] || code));
+      }
+      group.append(list);
+    }
+
+    if (item.certificate_url) {
+      group.append(element('a', '查回原签发件', {href:item.certificate_url, class:'certificate-link'}));
+    }
+
+    const note = element('textarea', item.note || '', {
+      class:'group-note', 'aria-label':`分组 ${item.group} 复核意见`,
+      minlength:'3', maxlength:'200', placeholder:'可填写分组复核意见；留空使用默认交接记录'
+    });
+    group.append(note);
+
+    const actions = element('div', undefined, {class:'group-actions'});
+    const approve = element('button', '签发', {
+      type:'button', class:'action', 'data-group-action':'APPROVED',
+      'data-group':item.group, 'data-revision':String(item.revision),
+      'aria-label':`签发分组 ${item.group}`,
+      ...((!committed || !item.can_approve) ? {disabled:''} : {})
+    });
+    const hold = element('button', '暂缓', {
+      type:'button', 'data-group-action':'HELD', 'data-group':item.group,
+      'data-revision':String(item.revision), 'aria-label':`暂缓分组 ${item.group}`,
+      ...((!committed || item.status === 'APPROVED') ? {disabled:''} : {})
+    });
+    actions.append(approve, hold);
+    group.append(actions);
+    target.append(group);
+  }
 }

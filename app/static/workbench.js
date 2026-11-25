@@ -1,5 +1,5 @@
 import {request} from './client.js';
-import {snapshot, history} from './view.js';
+import {snapshot, history, handoffPanel} from './view.js';
 import {visualize} from './plots.js';
 
 const form = document.querySelector('#source');
@@ -27,14 +27,17 @@ function announce(text, failure = false) {
 function draw() {
   if (!report) return;
   snapshot(report, selected, stage);
+  handoffPanel(report.handoff, Boolean(batch));
   visualize(report, selected);
   for (const button of stages) button.setAttribute('aria-pressed',String(button.dataset.stage===stage));
   document.querySelector('#panel-title').textContent = stages.find(button => button.dataset.stage===stage)?.textContent || '运行对账';
   detail.hidden = !batch;
   if (batch) {
-    document.querySelector('#run-status').textContent = `${batch.id.slice(0,10)} · ${batch.status} · r${batch.revision}`;
-    detail.querySelector('[value="APPROVED"]').disabled = !report.balance.releasable || batch.status==='APPROVED';
-    detail.querySelector('[value="HELD"]').disabled = batch.status==='APPROVED';
+    const runRevision = batch.run_revision ?? batch.revision;
+    const runStatus = batch.run_status ?? batch.status;
+    document.querySelector('#run-status').textContent = `${batch.id.slice(0,10)} · ${runStatus} · r${runRevision}`;
+    detail.querySelector('[value="APPROVED"]').disabled = !report.balance.releasable || runStatus==='APPROVED';
+    detail.querySelector('[value="HELD"]').disabled = runStatus==='APPROVED';
     evidence.href = `/api/runs/${batch.id}/evidence`;
   }
 }
@@ -98,9 +101,27 @@ document.querySelector('#history').addEventListener('click',event=>{
 detail.addEventListener('submit',event=>{
   event.preventDefault();
   perform(async()=>{
-    const payload={status:event.submitter.value,revision:batch.revision,note:detail.elements.note.value};
+    const payload={status:event.submitter.value,revision:batch.run_revision ?? batch.revision,note:detail.elements.note.value};
     const result=await request(`/api/runs/${batch.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     show(result,true); announce(result.status==='APPROVED'?'批次已签发':'批次已暂缓'); await refresh();
+  });
+});
+document.querySelector('#group-handoff').addEventListener('click',event=>{
+  const button=event.target.closest('[data-group-action]');
+  if (!button || button.disabled || running) return;
+  const group=button.dataset.group;
+  const item=button.closest('[data-group]');
+  const note=item?.querySelector('.group-note')?.value || '';
+  const revision=Number(button.dataset.revision || 0);
+  perform(async()=>{
+    const result=await request(`/api/runs/${batch.id}`,{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({group,revision,status:button.dataset.groupAction,note})
+    });
+    show(result,true);
+    announce(result.status==='APPROVED' ? `分组 ${group} 已签发，原签发件可查回` : `分组 ${group} 已暂缓`);
+    await refresh();
   });
 });
 preview(stage);
